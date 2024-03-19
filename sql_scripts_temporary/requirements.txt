@@ -1,0 +1,7 @@
+email must be varchar(100) CHECK (LENGTH(email) >= 3); (primary key)
+name must be varchar(100) NOT NULL CHECK (name <> '');
+surname must be varchar(100) CHECK (surname <> '');
+password must be varchar(50) NOT NULL CHECK (LENGTH(password) >= 5); LENGTH 10 for admin
+phone number must be varchar(20) NOT NULL CHECK (LENGTH(phone_number) >= 5);
+address must be varchar(250) CHECK (LENGTH(address) >= 10);
+balance_uah must be MONEY CHECK (balance_uah <= 1000000)
