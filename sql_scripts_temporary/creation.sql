@@ -6,6 +6,8 @@ individual_auto_part_code (always unique) - identifies an individual auto part f
 /*
 -- problems can be not enough or too much constrains, difference between constraints, bad references
 -- Make triggers when one element is added to the archive, parent entities are added with a certain amount
+
+-- I might add quantity to auto_part archive, also I have to add trigger on adding consignments to add to auto_part quantity
 */
 
 CREATE TABLE supplier (
@@ -52,6 +54,7 @@ CREATE TABLE auto_part (
     product_code VARCHAR(100) PRIMARY KEY CHECK (LENGTH(product_code) >= 5),
     name VARCHAR(250) NOT NULL CHECK (LENGTH(name) >= 2),
     price_uah MONEY CHECK (price_uah <= 1000000::MONEY),
+    quantity INTEGER NOT NULL CHECK (quantity >= 0), -- when zero has to be moved to archive
     warranty_term INTERVAL DAY NOT NULL CHECK (warranty_term >= INTERVAL '0 days' AND warranty_term <= INTERVAL '9000 days')
 );
 
@@ -89,7 +92,7 @@ CREATE TABLE consignment_archive (
     producing_factory VARCHAR(250) NOT NULL CHECK (producing_factory ~ '^[a-zA-Z0-9\s\-"''()\[\]]+$'),
     product_code VARCHAR(100) REFERENCES auto_part_archive(product_code) ON DELETE RESTRICT,
     serial_code VARCHAR(100) NOT NULL CHECK (LENGTH(serial_code) >= 5),
-    CONSTRAINT unique_supplier_id_deal_time UNIQUE (supplier_id, deal_time)
+    CONSTRAINT unique_supplier_id_deal_time_archive UNIQUE (supplier_id, deal_time)
 );
 
 CREATE TABLE individual_auto_part_archive (
@@ -114,3 +117,40 @@ CREATE TABLE auto_part_compatible_car (
     car_id INTEGER REFERENCES car(car_id) ON DELETE RESTRICT,
     PRIMARY KEY (product_code, car_id)
 );
+
+
+CREATE OR REPLACE FUNCTION delete_individual_auto_part_trigger()
+RETURNS TRIGGER AS $$
+DECLARE
+    product_code_to_delete VARCHAR(100);
+BEGIN
+    -- Retrieve the product code of the auto_part being deleted
+    SELECT a.product_code INTO product_code_to_delete
+    FROM individual_auto_part i
+    JOIN consignment c ON i.deal_code = c.deal_code
+    JOIN auto_part a ON c.product_code = a.product_code
+    WHERE i.individual_auto_part_code = OLD.individual_auto_part_code;
+
+    -- Decrease the quantity of auto_part when an individual_auto_part is deleted
+    UPDATE auto_part
+    SET quantity = quantity - 1
+    WHERE product_code = product_code_to_delete;
+
+    -- Check if the quantity reaches zero and move the auto_part to archive if needed
+    IF (SELECT quantity FROM auto_part WHERE product_code = product_code_to_delete) <= 0 THEN
+        INSERT INTO auto_part_archive(product_code, name, warranty_term)
+        SELECT product_code, name, warranty_term
+        FROM auto_part
+        WHERE product_code = product_code_to_delete;
+
+        DELETE FROM auto_part WHERE product_code = product_code_to_delete;
+    END IF;
+
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER delete_individual_auto_part
+AFTER DELETE ON individual_auto_part
+FOR EACH ROW
+EXECUTE FUNCTION delete_individual_auto_part_trigger();
